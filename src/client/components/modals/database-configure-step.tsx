@@ -2,6 +2,7 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api";
 import { AppIcon, FieldLabel, FormInput } from "../ui/primitives";
+import { SquareSwitch } from "../ui/square-switch";
 import { getDatabaseOption, isPostgresFamilyDatabase, type DatabaseType, type EnvEntry } from "./database-service-options";
 import { generateDatabaseHostname } from "./database-hostname";
 
@@ -36,12 +37,16 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>([]);
   const [rootDomain, setRootDomain] = useState("");
   const [publicHostname, setPublicHostname] = useState("");
+  const [pgVectorEnabled, setPgVectorEnabled] = useState(dbType === "pgvector");
 
+  const effectiveDbType: DatabaseType = pgVectorEnabled ? "pgvector" : dbType === "pgvector" ? "postgres" : dbType;
   const dbOption = getDatabaseOption(dbType);
-  const defaultPort = dbOption.defaultPort;
-  const dbLabel = dbOption.name;
+  const effectiveDbOption = getDatabaseOption(effectiveDbType);
+  const defaultPort = effectiveDbOption.defaultPort;
+  const dbLabel = effectiveDbOption.name;
+  const isPostgres = dbType === "postgres" || dbType === "pgvector";
 
-  // Pre-populate defaults
+  // Pre-populate defaults (keyed to the selected engine, not the pgvector toggle)
   useEffect(() => {
     setName(`${dbType}-db`);
     const password = generateRandomPassword();
@@ -107,13 +112,13 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
     if (!name.trim()) return;
     void onSubmit({
       name: name.trim(),
-      repoFullName: `database:${dbType}`,
+      repoFullName: `database:${effectiveDbType}`,
       repoUrl: "database",
       branch: "main",
       internalPort: defaultPort,
       databasePublicEnabled: true,
       databasePublicHostname: publicHostname.trim().toLowerCase() || undefined,
-      postgresLogicalReplicationEnabled: isPostgresFamilyDatabase(dbType),
+      postgresLogicalReplicationEnabled: isPostgresFamilyDatabase(effectiveDbType),
       env: envEntries
     });
   }
@@ -133,7 +138,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
               <FormInput
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder={`${dbType}-db`}
+                placeholder={`${effectiveDbType}-db`}
                 required
                 disabled={busy}
                 variant="monochrome"
@@ -148,6 +153,18 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             </div>
           </div>
 
+          {isPostgres ? (
+            <div className="border border-white/10 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs text-zinc-300">pgvector extension</div>
+                  <div className="mt-1 font-mono text-[9px] tracking-[0.08em] text-zinc-500">Use pgvector/pgvector:pg18 image with vector support</div>
+                </div>
+                <SquareSwitch checked={pgVectorEnabled} onCheckedChange={setPgVectorEnabled} disabled={busy} label="Enable pgvector" />
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid border border-white/10 md:grid-cols-2">
             <div>
               <div className="border-b border-white/10 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-zinc-600 md:border-r">Public hostname</div>
@@ -158,7 +175,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             <div>
               <div className="border-b border-white/10 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-zinc-600">Public URL variable</div>
               <div className="flex h-9 min-w-0 items-center px-3 font-mono text-xs text-zinc-300">
-                <span className="truncate">{isPostgresFamilyDatabase(dbType) ? "POSTGRES_PUBLIC_URL" : `${dbType.toUpperCase()}_PUBLIC_URL`}</span>
+                <span className="truncate">{isPostgresFamilyDatabase(effectiveDbType) ? "POSTGRES_PUBLIC_URL" : `${effectiveDbType.toUpperCase()}_PUBLIC_URL`}</span>
               </div>
             </div>
           </div>

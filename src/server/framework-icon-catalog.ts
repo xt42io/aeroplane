@@ -74,6 +74,14 @@ export const FRAMEWORK_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
 export const DATABASE_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
   { slug: "postgres", name: "PostgreSQL", search: "PostgreSQL", sourcePath: "postgresql.svg", titleAliases: ["PostgreSQL"], website: "https://www.postgresql.org/" },
   {
+    slug: "pgvector",
+    name: "pgvector",
+    search: "pgvector",
+    sourceUrl: "https://cdn.simpleicons.org/pgvector/0086C9",
+    titleAliases: ["pgvector", "PostgreSQL + pgvector"],
+    website: "https://github.com/pgvector/pgvector"
+  },
+  {
     slug: "timescale",
     name: "TimescaleDB",
     search: "TimescaleDB",

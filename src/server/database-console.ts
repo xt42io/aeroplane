@@ -563,6 +563,59 @@ export async function runDatabaseQuery(serviceId: string, sql: string) {
   throw new Error("SQL console is not available for this engine");
 }
 
+async function getPostgresColumnsForValidation(ctx: DatabaseContext, table: string): Promise<DatabaseColumn[]> {
+  const { schema, name } = splitTableId(table);
+  return postgresJson<DatabaseColumn[]>(ctx, `
+      SELECT COALESCE(json_agg(row_to_json(c)), '[]'::json)
+      FROM (
+        SELECT
+          c.column_name AS name,
+          c.data_type AS type,
+          c.is_nullable = 'YES' AS "nullable",
+          false AS "primaryKey"
+        FROM information_schema.columns c
+        WHERE c.table_schema = ${sqlLiteral(schema || "public")}
+          AND c.table_name = ${sqlLiteral(name)}
+        ORDER BY c.ordinal_position
+      ) c
+    `);
+}
+
+const postgresTextTypes = new Set([
+  "text",
+  "character varying",
+  "character",
+  "varchar",
+  "char",
+  "bpchar",
+  "name",
+  "citext"
+]);
+
+function normalizePostgresValue(column: DatabaseColumn, rawValue: unknown) {
+  const type = column.type.toLowerCase();
+  const isTextColumn = postgresTextTypes.has(type);
+
+  if (rawValue === null || rawValue === undefined) return null;
+
+  const value = String(rawValue).trim();
+  if (value === "") {
+    if (!column.nullable) throw new Error(`Column "${column.name}" is required`);
+    return isTextColumn ? String(rawValue) : null;
+  }
+
+  if (isTextColumn) return String(rawValue);
+
+  if (["integer", "bigint", "smallint"].includes(type)) {
+    if (!/^[+-]?\d+$/.test(value)) throw new Error(`Column "${column.name}" must be an integer (got "${String(rawValue)}")`);
+  } else if (["numeric", "decimal", "double precision", "real"].includes(type)) {
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(value)) throw new Error(`Column "${column.name}" must be a number (got "${String(rawValue)}")`);
+  } else if (type === "boolean") {
+    if (!/^(true|false|t|f|1|0)$/i.test(value)) throw new Error(`Column "${column.name}" must be true/false (got "${String(rawValue)}")`);
+  }
+  return value;
+}
+
 export async function insertDatabaseRow(serviceId: string, table: string, values: RowData) {
   const ctx = databaseContext(serviceId);
   const entries = Object.entries(values).filter(([key]) => key.trim());
@@ -572,10 +625,28 @@ export async function insertDatabaseRow(serviceId: string, table: string, values
   if (isMongoDatabase(ctx.dbType)) return insertMongoRow(ctx, table, values);
 
   if (isPostgresFamilyDatabase(ctx.dbType)) {
-    await runPostgres(
-      ctx,
-      `INSERT INTO ${postgresTableSql(table)} (${entries.map(([key]) => quotePgIdentifier(key)).join(", ")}) VALUES (${entries.map(([, value]) => sqlLiteral(value)).join(", ")})`
-    );
+    let normalizedEntries = entries;
+    try {
+      const columns = await getPostgresColumnsForValidation(ctx, table);
+      const columnMap = new Map(columns.map((c) => [c.name, c]));
+      normalizedEntries = entries.map(([key, value]) => {
+        const col = columnMap.get(key);
+        return [key, col ? normalizePostgresValue(col, value) : value];
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Column "')) throw error;
+    }
+    try {
+      await runPostgres(
+        ctx,
+        `INSERT INTO ${postgresTableSql(table)} (${normalizedEntries.map(([key]) => quotePgIdentifier(key)).join(", ")}) VALUES (${normalizedEntries.map(([, value]) => sqlLiteral(value)).join(", ")})`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const match = message.match(/invalid input syntax for type (\w+): "([^"]+)"/);
+      if (match) throw new Error(`Invalid value "${match[2]}" for ${match[1]} column`);
+      throw error;
+    }
     return { ok: true };
   }
 
@@ -600,10 +671,28 @@ export async function updateDatabaseRow(serviceId: string, table: string, primar
   if (isMongoDatabase(ctx.dbType)) return updateMongoRow(ctx, table, primaryKey, values);
 
   if (isPostgresFamilyDatabase(ctx.dbType)) {
-    await runPostgres(
-      ctx,
-      `UPDATE ${postgresTableSql(table)} SET ${assignments.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(", ")} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
-    );
+    let normalizedAssignments = assignments;
+    try {
+      const columns = await getPostgresColumnsForValidation(ctx, table);
+      const columnMap = new Map(columns.map((c) => [c.name, c]));
+      normalizedAssignments = assignments.map(([key, value]) => {
+        const col = columnMap.get(key);
+        return [key, col ? normalizePostgresValue(col, value) : value];
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Column "')) throw error;
+    }
+    try {
+      await runPostgres(
+        ctx,
+        `UPDATE ${postgresTableSql(table)} SET ${normalizedAssignments.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(", ")} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const match = message.match(/invalid input syntax for type (\w+): "([^"]+)"/);
+      if (match) throw new Error(`Invalid value "${match[2]}" for ${match[1]} column`);
+      throw error;
+    }
     return { ok: true };
   }
 
