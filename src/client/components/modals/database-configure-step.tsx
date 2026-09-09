@@ -39,38 +39,38 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
   const [publicHostname, setPublicHostname] = useState("");
   const [pgVectorEnabled, setPgVectorEnabled] = useState(dbType === "pgvector");
 
-  const effectiveDbType: DatabaseType = dbType === "postgres" && pgVectorEnabled ? "pgvector" : dbType;
+  const effectiveDbType: DatabaseType = pgVectorEnabled ? "pgvector" : dbType === "pgvector" ? "postgres" : dbType;
   const dbOption = getDatabaseOption(dbType);
   const effectiveDbOption = getDatabaseOption(effectiveDbType);
   const defaultPort = effectiveDbOption.defaultPort;
   const dbLabel = effectiveDbOption.name;
   const isPostgres = dbType === "postgres" || dbType === "pgvector";
 
-  // Pre-populate defaults
+  // Pre-populate defaults (keyed to the selected engine, not the pgvector toggle)
   useEffect(() => {
-    setName(`${effectiveDbType}-db`);
+    setName(`${dbType}-db`);
     const password = generateRandomPassword();
     const list: EnvEntry[] = [];
 
-    if (isPostgresFamilyDatabase(effectiveDbType)) {
+    if (isPostgresFamilyDatabase(dbType)) {
       list.push({ key: "POSTGRES_DB", value: "aeroplane" });
       list.push({ key: "POSTGRES_USER", value: "postgres" });
       list.push({ key: "POSTGRES_PASSWORD", value: password });
-      if (effectiveDbType === "timescale") {
+      if (dbType === "timescale") {
         list.push({ key: "TIMESCALEDB_TELEMETRY", value: "off" });
       }
-    } else if (effectiveDbType === "mysql") {
+    } else if (dbType === "mysql") {
       const userPassword = generateRandomPassword();
       list.push({ key: "MYSQL_DATABASE", value: "aeroplane" });
       list.push({ key: "MYSQL_USER", value: "mysql" });
       list.push({ key: "MYSQL_PASSWORD", value: userPassword });
       list.push({ key: "MYSQL_ROOT_PASSWORD", value: password });
-    } else if (effectiveDbType === "redis") {
+    } else if (dbType === "redis") {
       list.push({ key: "REDIS_PASSWORD", value: password });
-    } else if (effectiveDbType === "mongodb") {
+    } else if (dbType === "mongodb") {
       list.push({ key: "MONGO_INITDB_ROOT_USERNAME", value: "mongo" });
       list.push({ key: "MONGO_INITDB_ROOT_PASSWORD", value: password });
-    } else if (effectiveDbType === "clickhouse") {
+    } else if (dbType === "clickhouse") {
       list.push({ key: "CLICKHOUSE_DB", value: "aeroplane" });
       list.push({ key: "CLICKHOUSE_USER", value: "clickhouse" });
       list.push({ key: "CLICKHOUSE_PASSWORD", value: password });
@@ -79,7 +79,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
 
     setEnvEntries(list);
     setPublicHostname("");
-  }, [effectiveDbType]);
+  }, [dbType]);
 
   useEffect(() => {
     let cancelled = false;

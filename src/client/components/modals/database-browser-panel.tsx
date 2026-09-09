@@ -309,11 +309,11 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
       const raw = draftRow[col.name] ?? "";
       if (raw === "" && col.nullable) continue;
       const type = col.type.toLowerCase();
-      if (["integer", "bigint", "smallint"].includes(type) && raw !== "" && !/^-?\d+$/.test(raw.trim())) {
+      if (["integer", "bigint", "smallint"].includes(type) && raw !== "" && !/^[+-]?\d+$/.test(raw.trim())) {
         setError(`Column "${col.name}" must be an integer (got "${raw}")`);
         return;
       }
-      if (["numeric", "decimal", "double precision", "real"].includes(type) && raw !== "" && !/^-?\d+(\.\d+)?$/.test(raw.trim())) {
+      if (["numeric", "decimal", "double precision", "real"].includes(type) && raw !== "" && !/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(raw.trim())) {
         setError(`Column "${col.name}" must be a number (got "${raw}")`);
         return;
       }
