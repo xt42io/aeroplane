@@ -305,6 +305,23 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
 
   async function saveEdit(row: DatabaseRow) {
     if (!rowsResult || editingIndex === null) return;
+    for (const col of columns) {
+      const raw = draftRow[col.name] ?? "";
+      if (raw === "" && col.nullable) continue;
+      const type = col.type.toLowerCase();
+      if (["integer", "bigint", "smallint"].includes(type) && raw !== "" && !/^-?\d+$/.test(raw.trim())) {
+        setError(`Column "${col.name}" must be an integer (got "${raw}")`);
+        return;
+      }
+      if (["numeric", "decimal", "double precision", "real"].includes(type) && raw !== "" && !/^-?\d+(\.\d+)?$/.test(raw.trim())) {
+        setError(`Column "${col.name}" must be a number (got "${raw}")`);
+        return;
+      }
+      if (type === "boolean" && raw !== "" && !/^(true|false|t|f|1|0)$/i.test(raw.trim())) {
+        setError(`Column "${col.name}" must be true/false (got "${raw}")`);
+        return;
+      }
+    }
     setBusy("edit");
     setError("");
     try {

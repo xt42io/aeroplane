@@ -69,7 +69,8 @@ const envEditorTheme = EditorView.theme(
     },
     ".cm-scroller": {
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      lineHeight: "24px"
+      lineHeight: "24px",
+      overflow: "auto"
     },
     ".cm-content": {
       padding: "12px",
@@ -135,7 +136,7 @@ export function EnvCodeEditor({
   );
 
   return (
-    <div className={`mt-2 h-[28rem] min-h-64 resize-y overflow-hidden border border-white/15 bg-white/[0.03] transition focus-within:border-white focus-within:ring-2 focus-within:ring-white/10 ${disabled ? "opacity-50" : ""}`}>
+    <div className={`mt-2 h-[28rem] min-h-64 resize-y overflow-auto border border-white/15 bg-white/[0.03] transition focus-within:border-white focus-within:ring-2 focus-within:ring-white/10 ${disabled ? "opacity-50" : ""}`}>
       <CodeMirror
         value={value}
         height="100%"

@@ -8,6 +8,7 @@ function safeDockerIdentifier(value: string, fallback: string) {
 
 export function databaseImage(dbType: string) {
   if (dbType === "timescale") return "timescale/timescaledb:latest-pg18";
+  if (dbType === "pgvector") return "pgvector/pgvector:pg18";
   if (isPostgresFamilyDatabase(dbType)) return "postgres:18-alpine";
   if (dbType === "mysql") return "mysql:8";
   if (dbType === "redis") return "redis:7-alpine";
