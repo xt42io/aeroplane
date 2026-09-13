@@ -1,5 +1,7 @@
 import { createHmac, createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, statSync } from "node:fs";
+import { request as httpsRequest } from "node:https";
+import { pipeline } from "node:stream/promises";
 import type { R2Settings } from "./system-settings.js";
 
 type R2RequestOptions = {
@@ -22,6 +24,12 @@ export class R2RequestError extends Error {
 
 function sha256Hex(value: Buffer | string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+async function sha256File(localPath: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(localPath), hash);
+  return hash.digest("hex");
 }
 
 function hmac(key: Buffer | string, value: string) {
@@ -82,14 +90,18 @@ function signingKey(secret: string, date: string) {
   return hmac(serviceKey, "aws4_request");
 }
 
-async function signedR2Request(settings: R2Settings, options: R2RequestOptions) {
-  const body = options.body ?? Buffer.alloc(0);
-  const payloadHash = sha256Hex(body);
+function signRequest(
+  settings: R2Settings,
+  method: R2RequestOptions["method"],
+  bucket: string,
+  key: string | undefined,
+  payloadHash: string,
+  contentType: string
+) {
   const timestamp = amzDate();
   const host = `${settings.accountId}.r2.cloudflarestorage.com`;
-  const path = canonicalPath(options.bucket, options.key);
+  const path = canonicalPath(bucket, key);
   const url = `https://${host}${path}`;
-  const contentType = options.contentType ?? "application/octet-stream";
   const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
   const canonicalHeaders = [
     `content-type:${contentType}`,
@@ -97,31 +109,32 @@ async function signedR2Request(settings: R2Settings, options: R2RequestOptions) 
     `x-amz-content-sha256:${payloadHash}`,
     `x-amz-date:${timestamp.full}`
   ].join("\n") + "\n";
-  const canonicalRequest = [
-    options.method,
-    path,
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash
-  ].join("\n");
+  const canonicalRequest = [method, path, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
   const scope = `${timestamp.short}/auto/s3/aws4_request`;
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    timestamp.full,
-    scope,
-    sha256Hex(canonicalRequest)
-  ].join("\n");
+  const stringToSign = ["AWS4-HMAC-SHA256", timestamp.full, scope, sha256Hex(canonicalRequest)].join("\n");
   const signature = hmacHex(signingKey(settings.secretAccessKey, timestamp.short), stringToSign);
-  const response = await fetch(url, {
-    method: options.method,
-    body: options.method === "GET" || options.method === "HEAD" ? undefined : body,
+
+  return {
+    url,
     headers: {
       Authorization: `AWS4-HMAC-SHA256 Credential=${settings.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
       "Content-Type": contentType,
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": timestamp.full
     }
+  };
+}
+
+async function signedR2Request(settings: R2Settings, options: R2RequestOptions) {
+  const body = options.body ?? Buffer.alloc(0);
+  const payloadHash = sha256Hex(body);
+  const contentType = options.contentType ?? "application/octet-stream";
+  const { url, headers } = signRequest(settings, options.method, options.bucket, options.key, payloadHash, contentType);
+
+  const response = await fetch(url, {
+    method: options.method,
+    body: options.method === "GET" || options.method === "HEAD" ? undefined : body,
+    headers
   });
 
   if (!response.ok) {
@@ -131,6 +144,40 @@ async function signedR2Request(settings: R2Settings, options: R2RequestOptions) 
   }
 
   return response;
+}
+
+async function putR2ObjectStream(settings: R2Settings, localPath: string, bucket: string, key: string, contentType: string) {
+  const size = statSync(localPath).size;
+  const payloadHash = await sha256File(localPath);
+  const { url, headers } = signRequest(settings, "PUT", bucket, key, payloadHash, contentType);
+  const { hostname, pathname, search } = new URL(url);
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const req = httpsRequest(
+      {
+        hostname,
+        path: `${pathname}${search}`,
+        method: "PUT",
+        headers: { ...headers, "Content-Length": size }
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
+            resolvePromise();
+            return;
+          }
+          const detail = extractR2ErrorDetail(status, Buffer.concat(chunks).toString("utf8"));
+          reject(new R2RequestError(detail.message, status, detail.code));
+        });
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    pipeline(createReadStream(localPath), req).catch(reject);
+  });
 }
 
 export async function ensureR2Bucket(settings: R2Settings) {
@@ -145,14 +192,7 @@ export async function ensureR2Bucket(settings: R2Settings) {
 }
 
 export async function uploadFileToR2(settings: R2Settings, localPath: string, key: string) {
-  const body = readFileSync(localPath);
-  await signedR2Request(settings, {
-    method: "PUT",
-    bucket: settings.bucket,
-    key,
-    body,
-    contentType: "application/octet-stream"
-  });
+  await putR2ObjectStream(settings, localPath, settings.bucket, key, "application/octet-stream");
 }
 
 export async function downloadR2Object(settings: R2Settings, key: string) {
@@ -161,7 +201,12 @@ export async function downloadR2Object(settings: R2Settings, key: string) {
 }
 
 export async function downloadR2ObjectToFile(settings: R2Settings, key: string, localPath: string) {
-  writeFileSync(localPath, await downloadR2Object(settings, key));
+  const response = await signedR2Request(settings, { method: "GET", bucket: settings.bucket, key });
+  if (!response.body) {
+    throw new Error("R2 download returned no response body");
+  }
+  const { Readable } = await import("node:stream");
+  await pipeline(Readable.fromWeb(response.body as import("node:stream/web").ReadableStream), createWriteStream(localPath));
 }
 
 export async function deleteR2Object(settings: R2Settings, key: string) {

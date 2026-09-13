@@ -1,9 +1,10 @@
 import { desc, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { pipeline } from "node:stream/promises";
 import { nanoid } from "nanoid";
 import { config } from "./config.js";
 import { isMongoDatabase, isPostgresFamilyDatabase } from "./database-engine.js";
@@ -110,8 +111,10 @@ async function copyBackupFromContainer(ctx: DatabaseContext, remotePath: string,
   await runDockerExec(ctx.containerName, ["rm", "-f", remotePath]).catch(() => undefined);
 }
 
-function fileSha256(localPath: string) {
-  return createHash("sha256").update(readFileSync(localPath)).digest("hex");
+async function fileSha256(localPath: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(localPath), hash);
+  return hash.digest("hex");
 }
 
 function serviceOwnerUserId(service: Service) {
@@ -445,7 +448,7 @@ export async function createDatabaseBackup(serviceId: string, storage?: BackupSt
     localBackup = await createLocalBackup(ctx, backupId);
     const stats = statSync(localBackup.localPath);
     sizeBytes = stats.size;
-    checksum = fileSha256(localBackup.localPath);
+    checksum = await fileSha256(localBackup.localPath);
     let r2Key: string | null = null;
     let localPath: string | null = localBackup.localPath;
 
@@ -490,6 +493,7 @@ export async function createDatabaseBackup(serviceId: string, storage?: BackupSt
     };
 
     if (target === "disk+r2" && r2UploadStarted && localBackup?.localPath && existsSync(localBackup.localPath)) {
+      const finalChecksum = checksum ?? (await fileSha256(localBackup.localPath));
       db.update(databaseBackups)
         .set({
           status: "succeeded",
@@ -497,7 +501,7 @@ export async function createDatabaseBackup(serviceId: string, storage?: BackupSt
           localPath: localBackup.localPath,
           r2Key: null,
           sizeBytes: sizeBytes ?? statSync(localBackup.localPath).size,
-          checksum: checksum ?? fileSha256(localBackup.localPath),
+          checksum: finalChecksum,
           error: `R2 upload failed: ${errorMessage}`,
           finishedAt: nowIso()
         })
@@ -554,13 +558,14 @@ export async function restoreDatabaseBackup(serviceId: string, backupId: string)
   const { backup, localPath, cleanup, download } = getDatabaseBackupFile(serviceId, backupId);
   if (download) await download;
   try {
+    const checksum = backup.checksum ?? (await fileSha256(localPath));
     await restoreDatabaseDump({
       serviceId,
       engine: backup.engine,
       format: backup.format,
       path: backup.fileName ?? backup.id,
       sizeBytes: backup.sizeBytes ?? statSync(localPath).size,
-      checksum: backup.checksum ?? fileSha256(localPath)
+      checksum
     }, localPath);
   } finally {
     cleanup?.();
