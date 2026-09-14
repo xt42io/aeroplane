@@ -12,7 +12,7 @@ export function GitHubInstallModal({
   status: null | GitHubStatus;
   onClose: () => void;
 }) {
-  if (!open || !status || status.mode !== "app" || status.installed || !status.installUrl) {
+  if (!open || !status || status.mode !== "app" || !status.installUrl) {
     return null;
   }
 
@@ -21,18 +21,24 @@ export function GitHubInstallModal({
       open={open}
       onClose={onClose}
       icon={GithubIcon}
-      title="Install GitHub App"
-      meta="Connect the app to at least one repository before creating a service."
+      title={status.installed ? "Add GitHub account" : "Install GitHub App"}
+      meta={
+        status.installed
+          ? "Repos from every connected account or organization show up together when creating a service."
+          : "Connect the app to at least one repository before creating a service."
+      }
       width="max-w-2xl"
     >
       <div className="space-y-5">
         <div className="border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm leading-6 text-zinc-300">
-          The server is configured, but the GitHub App is not installed on any repositories yet. Install it once, then new services can browse repos, pick branches, and choose deployment directories directly.
+          {status.installed
+            ? "Install the app on another GitHub account or organization to browse and deploy from its repositories too."
+            : "The server is configured, but the GitHub App is not installed on any repositories yet. Install it once, then new services can browse repos, pick branches, and choose deployment directories directly."}
         </div>
         <div className="flex justify-end">
           <a href={status.installUrl} target="_blank" rel="noreferrer" className={shellButton("primary")}>
             <AppIcon icon={GithubIcon} size={16} />
-            Install GitHub App
+            {status.installed ? "Install on another account" : "Install GitHub App"}
           </a>
         </div>
       </div>

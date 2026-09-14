@@ -237,7 +237,7 @@ export function GitHubSettingsPanel({ open }: { open: boolean }) {
             </div>
           </div>
 
-          {github.status.mode === "app" && github.status.installUrl && !github.status.installed ? (
+          {github.status.mode === "app" && github.status.installUrl ? (
             <a
               href={github.status.installUrl}
               target="_blank"
@@ -245,7 +245,7 @@ export function GitHubSettingsPanel({ open }: { open: boolean }) {
               className="mt-5 inline-flex min-h-10 w-fit items-center justify-center gap-2 bg-white px-4 text-sm text-black transition hover:bg-zinc-200"
             >
               <AppIcon icon={GithubIcon} size={15} />
-              Install GitHub App
+              {github.status.installed ? "Install on another account" : "Install GitHub App"}
             </a>
           ) : null}
 

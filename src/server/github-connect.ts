@@ -447,7 +447,7 @@ export function buildGitHubAppManifest(options: { baseUrl: string; name: string 
     name: options.name,
     url: base,
     redirect_url: `${base}/api/github/manifest/callback`,
-    public: false,
+    public: true,
     default_permissions: {
       contents: "read",
       metadata: "read",
