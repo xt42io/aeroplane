@@ -6,6 +6,8 @@ import {
   GithubIcon,
   Globe02Icon,
   PackageIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
   LeftToRightListStarIcon,
   VariableIcon,
   VideoConsoleIcon,
@@ -571,6 +573,40 @@ export function ServicePageShell({
     }
   }
 
+  async function stopService() {
+    setBusy("stop");
+    setError("");
+    try {
+      const result = await api.stopService(serviceId);
+      if (result.caddy && result.caddy.ok === false) {
+        setError(`Service stopped, but the Caddy reload failed: ${result.caddy.detail}`);
+      }
+      await loadOverview({ showLoading: false });
+      await onProjectRefresh();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not stop service");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function startService() {
+    setBusy("start");
+    setError("");
+    try {
+      const result = await api.startService(serviceId);
+      if (result.caddy && result.caddy.ok === false) {
+        setError(`Service started, but the Caddy reload failed: ${result.caddy.detail}`);
+      }
+      await loadOverview({ showLoading: false });
+      await onProjectRefresh();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not start service");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function deleteService() {
     if (!overview?.service) return;
 
@@ -592,6 +628,7 @@ export function ServicePageShell({
   const isDockerImage = service ? isDockerImageService(service) : false;
   const isFunction = service ? isFunctionService(service) : false;
   const isWorker = service?.runtimeMode === "worker";
+  const isStaticSite = Boolean(service && !isDatabase && !isWorker && service.staticOutput?.trim());
   const isGitUrlSource = Boolean(service && !isDatabase && !isDockerImage && !isFunction && !settings.repoFullName && settings.repoUrl);
   const databaseEngine = service?.repoFullName?.startsWith("database:")
     ? service.repoFullName.slice("database:".length).toLowerCase()
@@ -839,7 +876,12 @@ export function ServicePageShell({
 
                   <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-4 py-4 sm:px-5">
                     <div className="flex items-center gap-3">
-                      {isDatabase ? (
+                      {service?.status === "stopped" ? (
+                        <div className="flex h-8 items-center gap-2 text-xs text-zinc-500">
+                          <BrowserIconFallback size={14} />
+                          <span className="truncate">Service stopped</span>
+                        </div>
+                      ) : isDatabase ? (
                         <div className="flex h-8 items-center gap-2 text-xs text-zinc-500">
                           <BrowserIconFallback size={14} />
                           <span className="truncate">
@@ -885,6 +927,27 @@ export function ServicePageShell({
                         <AppIcon icon={FolderOpenIcon} size={13} />
                         Move service
                       </button>
+                      {isStaticSite ? null : service?.status === "stopped" ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 items-center justify-center gap-2 border border-white/15 px-3 text-xs text-zinc-300 transition hover:border-white/35 hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+                          onClick={() => void startService()}
+                          disabled={Boolean(busy)}
+                        >
+                          <AppIcon icon={PlayCircleIcon} size={13} />
+                          Start service
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 items-center justify-center gap-2 border border-white/15 px-3 text-xs text-zinc-300 transition hover:border-white/35 hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+                          onClick={() => void stopService()}
+                          disabled={Boolean(busy) || hasPendingDeployment || (service?.status !== "active" && service?.status !== "crashed")}
+                        >
+                          <AppIcon icon={PauseCircleIcon} size={13} />
+                          Stop service
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="inline-flex h-8 items-center justify-center gap-2 border border-rose-400/40 px-3 text-xs text-rose-300 transition hover:bg-rose-400/10 disabled:opacity-40"

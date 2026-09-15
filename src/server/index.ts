@@ -18,7 +18,7 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { isValidApplicationVolumePath } from "./application-volume.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
-import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, staticSiteDirForService } from "./deploy.js";
+import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, startServiceRuntime, staticSiteDirForService, stopServiceRuntime } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { normalizeServiceBuildMethod, serviceBuildMethods } from "./dockerfile-build.js";
 import { detectFramework, detectFrameworkPreview } from "./frameworks.js";
@@ -3101,6 +3101,69 @@ app.delete("/api/services/:serviceId", async (c) => {
   return c.json({ ok: true, caddy });
 });
 
+function isStaticSiteService(service: Service) {
+  return !isDatabaseService(service) && !isWorkerService(service) && Boolean(service.staticOutput?.trim());
+}
+
+app.post("/api/services/:serviceId/stop", async (c) => {
+  const serviceAccess = getAuthorizedService(c);
+  if (serviceAccess.response) return serviceAccess.response;
+  const { service } = serviceAccess;
+
+  if (isStaticSiteService(service)) {
+    return jsonError("Static sites don't run a container — there's nothing to stop.", 400);
+  }
+  if (service.status === "queued" || service.status === "building") {
+    return jsonError("Wait for the current deployment to finish before stopping this service.", 409);
+  }
+  if (service.status !== "active") {
+    return jsonError("Deploy this service before stopping it.", 400);
+  }
+
+  const result = await stopServiceRuntime(service);
+  if (!result.ok) {
+    return jsonError(`Could not stop the container: ${result.message ?? "unknown Docker error"}`, 409);
+  }
+
+  db.update(services).set({ status: "stopped", updatedAt: nowIso() }).where(eq(services.id, service.id)).run();
+
+  const updated = getServiceById(service.id);
+  if (!updated) {
+    return jsonError("Service not found after stop", 404);
+  }
+
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ service: await publicService(updated), caddy });
+});
+
+app.post("/api/services/:serviceId/start", async (c) => {
+  const serviceAccess = getAuthorizedService(c);
+  if (serviceAccess.response) return serviceAccess.response;
+  const { service } = serviceAccess;
+
+  if (service.status !== "stopped") {
+    return jsonError("Service is not stopped.", 400);
+  }
+
+  const result = await startServiceRuntime(service);
+  if (!result.ok) {
+    if (result.containerMissing) {
+      return jsonError("The container no longer exists. Redeploy this service instead.", 409);
+    }
+    return jsonError(`Could not restart the container: ${result.message ?? "unknown Docker error"}`, 502);
+  }
+
+  db.update(services).set({ status: "active", updatedAt: nowIso() }).where(eq(services.id, service.id)).run();
+
+  const updated = getServiceById(service.id);
+  if (!updated) {
+    return jsonError("Service not found after start", 404);
+  }
+
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ service: await publicService(updated), caddy });
+});
+
 app.delete("/api/projects/:projectId", async (c) => {
   const project = getProjectById(c.req.param("projectId"));
   if (!project) {
@@ -3512,12 +3575,15 @@ app.post("/api/github/app/webhook", async (c) => {
     return c.json({ ok: true, ignored: `${repoFullName}@${branch}` });
   }
 
-  for (const projectId of new Set(matchingServices.map((service) => service.projectId))) {
+  const deployableServices = matchingServices.filter((service) => service.status !== "stopped");
+  const skippedStoppedServiceIds = matchingServices.filter((service) => service.status === "stopped").map((service) => service.id);
+
+  for (const projectId of new Set(deployableServices.map((service) => service.projectId))) {
     syncProjectDatabaseConnectionEnv(projectId);
   }
 
-  const queued = matchingServices.map((service) => enqueueDeployment(service.id, { trigger: "github", commitSha: payload.after }));
-  return c.json({ ok: true, queued: queued.map((deployment) => deployment.id) });
+  const queued = deployableServices.map((service) => enqueueDeployment(service.id, { trigger: "github", commitSha: payload.after }));
+  return c.json({ ok: true, queued: queued.map((deployment) => deployment.id), skippedStopped: skippedStoppedServiceIds });
 });
 
 app.post("/api/integrations/railway/projects", async (c) => {

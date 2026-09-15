@@ -776,6 +776,10 @@ export const api = {
   moveServiceToEnvironment: (serviceId: string, body: { environmentId: string }) =>
     request<{ service: Service | null }>(`/api/services/${serviceId}/environment`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteService: (serviceId: string) => request(`/api/services/${serviceId}`, { method: "DELETE" }),
+  stopService: (serviceId: string) =>
+    request<{ service: Service; caddy?: { ok: boolean; detail: string } }>(`/api/services/${serviceId}/stop`, { method: "POST" }),
+  startService: (serviceId: string) =>
+    request<{ service: Service; caddy?: { ok: boolean; detail: string } }>(`/api/services/${serviceId}/start`, { method: "POST" }),
   createDeployment: (serviceId: string) =>
     request<{ deployment: Deployment }>(`/api/services/${serviceId}/deployments`, { method: "POST" }),
   abortDeployment: (deploymentId: string) =>

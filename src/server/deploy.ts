@@ -760,6 +760,40 @@ export async function removeServiceRuntime(service: Service) {
   });
 }
 
+export type ServiceRuntimeToggleResult = { ok: boolean; containerMissing: boolean; message?: string };
+
+function runDockerLifecycleCommand(command: "stop" | "start", containerName: string): Promise<ServiceRuntimeToggleResult> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("docker", [command, containerName], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stderr = "";
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => resolvePromise({ ok: false, containerMissing: false, message: error.message }));
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise({ ok: true, containerMissing: false });
+        return;
+      }
+      const containerMissing = /no such container/i.test(stderr);
+      resolvePromise({ ok: false, containerMissing, message: stderr.trim() || `docker ${command} exited with code ${code}` });
+    });
+  });
+}
+
+export async function stopServiceRuntime(service: Service): Promise<ServiceRuntimeToggleResult> {
+  if (config.deployDryRun) return { ok: true, containerMissing: false };
+  return runDockerLifecycleCommand("stop", containerNameForService(service.id));
+}
+
+export async function startServiceRuntime(service: Service): Promise<ServiceRuntimeToggleResult> {
+  if (config.deployDryRun) return { ok: true, containerMissing: false };
+  return runDockerLifecycleCommand("start", containerNameForService(service.id));
+}
+
 function normalizedStaticOutputPath(staticOutput: string) {
   return staticOutput.replace(/^\.?\/*/, "").replace(/\/+$/g, "");
 }

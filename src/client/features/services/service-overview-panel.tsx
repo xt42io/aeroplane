@@ -6,6 +6,7 @@ import {
   FunctionIcon,
   GithubIcon,
   PackageIcon,
+  PauseCircleIcon,
   Settings01Icon,
   VariableIcon
 } from "@hugeicons/core-free-icons";
@@ -120,7 +121,7 @@ function warningItems({
 
   if (!latest) warnings.push("No deployment has run yet.");
   if (latest?.status === "failed") warnings.push("Latest deployment failed.");
-  if (!service.reachable && !deploymentIsPending(service.status)) warnings.push("Runtime is not reachable.");
+  if (!service.reachable && !deploymentIsPending(service.status) && service.status !== "stopped") warnings.push("Runtime is not reachable.");
   if (!isDatabase && !isWorker && domains.some((domain) => domain.status !== "active")) warnings.push("One or more domains still need DNS verification.");
   if (!isDatabase && !isDockerImage && !isFunction && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
 
@@ -250,7 +251,14 @@ export function ServiceOverviewPanel({
         </div>
       </section>
 
-      {warnings.length > 0 ? (
+      {service.status === "stopped" ? (
+        <section className="border-l-2 border-zinc-500 bg-zinc-500/[0.07] px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-zinc-300">
+            <AppIcon icon={PauseCircleIcon} size={15} className="text-zinc-400" />
+            <span>Service is stopped.</span>
+          </div>
+        </section>
+      ) : warnings.length > 0 ? (
         <section className="border-l-2 border-amber-400 bg-amber-400/[0.08] px-4 py-3">
           <div className="grid gap-2 md:grid-cols-2">
             {warnings.map((warning) => (
