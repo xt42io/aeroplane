@@ -17,7 +17,7 @@ import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
-import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, staticSiteDirForService } from "./deploy.js";
+import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, startServiceRuntime, staticSiteDirForService, stopServiceRuntime } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { normalizeServiceBuildMethod, serviceBuildMethods } from "./dockerfile-build.js";
 import { detectFramework, detectFrameworkPreview } from "./frameworks.js";
@@ -2988,6 +2988,55 @@ app.delete("/api/services/:serviceId", async (c) => {
 
   const caddy = await writeAndReloadCaddy();
   return c.json({ ok: true, caddy });
+});
+
+app.post("/api/services/:serviceId/stop", async (c) => {
+  const serviceAccess = getAuthorizedService(c);
+  if (serviceAccess.response) return serviceAccess.response;
+  const { service } = serviceAccess;
+
+  if (service.status === "queued" || service.status === "building") {
+    return jsonError("Wait for the current deployment to finish before stopping this service.", 409);
+  }
+  if (service.status === "stopped") {
+    return jsonError("Service is already stopped.", 409);
+  }
+
+  await stopServiceRuntime(service);
+  db.update(services).set({ status: "stopped", updatedAt: nowIso() }).where(eq(services.id, service.id)).run();
+
+  const updated = getServiceById(service.id);
+  if (!updated) {
+    return jsonError("Service not found after stop", 404);
+  }
+
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ service: await publicService(updated), caddy });
+});
+
+app.post("/api/services/:serviceId/start", async (c) => {
+  const serviceAccess = getAuthorizedService(c);
+  if (serviceAccess.response) return serviceAccess.response;
+  const { service } = serviceAccess;
+
+  if (service.status !== "stopped") {
+    return jsonError("Service is not stopped.", 400);
+  }
+
+  const result = await startServiceRuntime(service);
+  if (!result.ok) {
+    return jsonError("Could not restart the existing container. Redeploy this service instead.", 409);
+  }
+
+  db.update(services).set({ status: "active", updatedAt: nowIso() }).where(eq(services.id, service.id)).run();
+
+  const updated = getServiceById(service.id);
+  if (!updated) {
+    return jsonError("Service not found after start", 404);
+  }
+
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ service: await publicService(updated), caddy });
 });
 
 app.delete("/api/projects/:projectId", async (c) => {

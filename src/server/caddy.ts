@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
@@ -66,7 +66,10 @@ ${caddyTlsConfig(hostname)}  encode zstd gzip
 
 export function renderCaddyfile() {
   ensureDefaultDomainsForExistingServices();
-  const routableService = or(inArray(services.status, ["active", "building"]), isNotNull(services.activePort));
+  const routableService = and(
+    ne(services.status, "stopped"),
+    or(inArray(services.status, ["active", "building"]), isNotNull(services.activePort))
+  );
   const domainMappings = db
     .select({
       serviceId: services.id,
@@ -90,7 +93,7 @@ export function renderCaddyfile() {
       repoFullName: services.repoFullName
     })
     .from(services)
-    .where(and(eq(services.databasePublicEnabled, true), isNotNull(services.databasePublicHostname)))
+    .where(and(eq(services.databasePublicEnabled, true), isNotNull(services.databasePublicHostname), ne(services.status, "stopped")))
     .all();
 
   const blocks: string[] = [];

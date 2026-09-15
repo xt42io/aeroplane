@@ -722,6 +722,34 @@ export async function removeServiceRuntime(service: Service) {
   });
 }
 
+export async function stopServiceRuntime(service: Service) {
+  if (config.deployDryRun) return;
+
+  const containerName = containerNameForService(service.id);
+  return new Promise<void>((resolvePromise) => {
+    const child = spawn("docker", ["stop", containerName], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    child.on("error", () => resolvePromise());
+    child.on("close", () => resolvePromise());
+  });
+}
+
+export async function startServiceRuntime(service: Service): Promise<{ ok: boolean }> {
+  if (config.deployDryRun) return { ok: true };
+
+  const containerName = containerNameForService(service.id);
+  return new Promise((resolvePromise) => {
+    const child = spawn("docker", ["start", containerName], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    child.on("error", () => resolvePromise({ ok: false }));
+    child.on("close", (code) => resolvePromise({ ok: code === 0 }));
+  });
+}
+
 function normalizedStaticOutputPath(staticOutput: string) {
   return staticOutput.replace(/^\.?\/*/, "").replace(/\/+$/g, "");
 }

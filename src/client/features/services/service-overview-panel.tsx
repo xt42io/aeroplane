@@ -120,7 +120,7 @@ function warningItems({
 
   if (!latest) warnings.push("No deployment has run yet.");
   if (latest?.status === "failed") warnings.push("Latest deployment failed.");
-  if (!service.reachable && !deploymentIsPending(service.status)) warnings.push("Runtime is not reachable.");
+  if (!service.reachable && !deploymentIsPending(service.status) && service.status !== "stopped") warnings.push("Runtime is not reachable.");
   if (!isDatabase && !isWorker && domains.some((domain) => domain.status !== "active")) warnings.push("One or more domains still need DNS verification.");
   if (!isDatabase && !isDockerImage && !isFunction && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
 
