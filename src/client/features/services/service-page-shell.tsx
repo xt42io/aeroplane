@@ -570,15 +570,37 @@ export function ServicePageShell({
   }
 
   async function stopService() {
-    await doAction("stop", async () => {
-      await api.stopService(serviceId);
-    });
+    setBusy("stop");
+    setError("");
+    try {
+      const result = await api.stopService(serviceId);
+      if (result.caddy && result.caddy.ok === false) {
+        setError(`Service stopped, but the Caddy reload failed: ${result.caddy.detail}`);
+      }
+      await loadOverview({ showLoading: false });
+      await onProjectRefresh();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not stop service");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function startService() {
-    await doAction("start", async () => {
-      await api.startService(serviceId);
-    });
+    setBusy("start");
+    setError("");
+    try {
+      const result = await api.startService(serviceId);
+      if (result.caddy && result.caddy.ok === false) {
+        setError(`Service started, but the Caddy reload failed: ${result.caddy.detail}`);
+      }
+      await loadOverview({ showLoading: false });
+      await onProjectRefresh();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not start service");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function deleteService() {
@@ -602,6 +624,7 @@ export function ServicePageShell({
   const isDockerImage = service ? isDockerImageService(service) : false;
   const isFunction = service ? isFunctionService(service) : false;
   const isWorker = service?.runtimeMode === "worker";
+  const isStaticSite = Boolean(service && !isDatabase && !isWorker && service.staticOutput?.trim());
   const isGitUrlSource = Boolean(service && !isDatabase && !isDockerImage && !isFunction && !settings.repoFullName && settings.repoUrl);
   const databaseEngine = service?.repoFullName?.startsWith("database:")
     ? service.repoFullName.slice("database:".length).toLowerCase()
@@ -900,7 +923,7 @@ export function ServicePageShell({
                         <AppIcon icon={FolderOpenIcon} size={13} />
                         Move service
                       </button>
-                      {service?.status === "stopped" ? (
+                      {isStaticSite ? null : service?.status === "stopped" ? (
                         <button
                           type="button"
                           className="inline-flex h-8 items-center justify-center gap-2 border border-white/15 px-3 text-xs text-zinc-300 transition hover:border-white/35 hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
@@ -915,7 +938,7 @@ export function ServicePageShell({
                           type="button"
                           className="inline-flex h-8 items-center justify-center gap-2 border border-white/15 px-3 text-xs text-zinc-300 transition hover:border-white/35 hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
                           onClick={() => void stopService()}
-                          disabled={Boolean(busy) || hasPendingDeployment}
+                          disabled={Boolean(busy) || hasPendingDeployment || (service?.status !== "active" && service?.status !== "crashed")}
                         >
                           <AppIcon icon={PauseCircleIcon} size={13} />
                           Stop service

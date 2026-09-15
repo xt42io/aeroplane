@@ -722,32 +722,38 @@ export async function removeServiceRuntime(service: Service) {
   });
 }
 
-export async function stopServiceRuntime(service: Service) {
-  if (config.deployDryRun) return;
+export type ServiceRuntimeToggleResult = { ok: boolean; containerMissing: boolean; message?: string };
 
-  const containerName = containerNameForService(service.id);
-  return new Promise<void>((resolvePromise) => {
-    const child = spawn("docker", ["stop", containerName], {
+function runDockerLifecycleCommand(command: "stop" | "start", containerName: string): Promise<ServiceRuntimeToggleResult> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("docker", [command, containerName], {
       stdio: ["ignore", "pipe", "pipe"]
     });
+    let stderr = "";
 
-    child.on("error", () => resolvePromise());
-    child.on("close", () => resolvePromise());
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => resolvePromise({ ok: false, containerMissing: false, message: error.message }));
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise({ ok: true, containerMissing: false });
+        return;
+      }
+      const containerMissing = /no such container/i.test(stderr);
+      resolvePromise({ ok: false, containerMissing, message: stderr.trim() || `docker ${command} exited with code ${code}` });
+    });
   });
 }
 
-export async function startServiceRuntime(service: Service): Promise<{ ok: boolean }> {
-  if (config.deployDryRun) return { ok: true };
+export async function stopServiceRuntime(service: Service): Promise<ServiceRuntimeToggleResult> {
+  if (config.deployDryRun) return { ok: true, containerMissing: false };
+  return runDockerLifecycleCommand("stop", containerNameForService(service.id));
+}
 
-  const containerName = containerNameForService(service.id);
-  return new Promise((resolvePromise) => {
-    const child = spawn("docker", ["start", containerName], {
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    child.on("error", () => resolvePromise({ ok: false }));
-    child.on("close", (code) => resolvePromise({ ok: code === 0 }));
-  });
+export async function startServiceRuntime(service: Service): Promise<ServiceRuntimeToggleResult> {
+  if (config.deployDryRun) return { ok: true, containerMissing: false };
+  return runDockerLifecycleCommand("start", containerNameForService(service.id));
 }
 
 function normalizedStaticOutputPath(staticOutput: string) {
