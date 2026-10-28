@@ -7,6 +7,8 @@ import { basename, join } from "node:path";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
+import { assertManagedDatabase } from "./database-connections.js";
+import { assertPostgisImportCompatible, postgisExtensions, skipPostgisExtensionEntry } from "./postgis-import.js";
 import { importedTimescaleSourceImageForService } from "./database-source-image.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { databaseDataVolumeName } from "./database-runtime.js";
@@ -49,6 +51,7 @@ type PostgresDumpOptions = {
 type PostgresSourceInfo = {
   major: number | null;
   timescaleVersion: string | null;
+  postgis: Record<string, string>;
 };
 
 type PostgresTargetContext = {
@@ -89,6 +92,7 @@ function envMapForService(serviceId: string) {
 }
 
 function postgresService(serviceId: string) {
+  assertManagedDatabase(serviceId);
   const service = getServiceById(serviceId);
   if (!service || !isDatabaseService(service)) {
     throw new Error("Database service not found");
@@ -168,15 +172,16 @@ async function readSourcePostgresInfo(sourceUrl: string): Promise<PostgresSource
       postgresDumpImage,
       "sh",
       "-lc",
-      "psql -X --dbname=\"$SOURCE_DATABASE_URL\" --tuples-only --no-align --command=\"SELECT current_setting('server_version_num') || '|' || coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')\""
+      "psql -X --dbname=\"$SOURCE_DATABASE_URL\" --tuples-only --no-align --command=\"SELECT current_setting('server_version_num') || '|' || coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '') || '|' || coalesce((SELECT json_object_agg(extname, extversion)::text FROM pg_extension WHERE extname IN ('postgis','postgis_topology','postgis_raster','postgis_sfcgal','postgis_tiger_geocoder')), '{}')\""
     ]);
-    const [versionNum = "", timescaleVersion = ""] = result.stdout.trim().split("|");
+    const [versionNum = "", timescaleVersion = "", postgis = "{}"] = result.stdout.trim().split("|");
     return {
       major: postgresMajorVersion(versionNum),
-      timescaleVersion: timescaleVersion.trim() || null
+      timescaleVersion: timescaleVersion.trim() || null,
+      postgis: JSON.parse(postgis)
     };
   } catch {
-    return { major: null, timescaleVersion: null };
+    return { major: null, timescaleVersion: null, postgis: {} };
   }
 }
 
@@ -383,6 +388,20 @@ async function createTimescaleRestoreList(containerName: string, remoteDumpPath:
   }
 }
 
+async function createPostgisRestoreList(containerName: string, remoteDumpPath: string) {
+  const result = await runDockerExec(containerName, ["pg_restore", "--list", remoteDumpPath]);
+  const list = result.stdout.split("\n").filter((line) => !skipPostgisExtensionEntry(line)).join("\n");
+  const localPath = join(tmpdir(), `aeroplane-postgis-restore-${nanoid(10)}.list`);
+  const remotePath = `/tmp/aeroplane-postgis-restore-${nanoid(10)}.list`;
+  try {
+    writeFileSync(localPath, list);
+    await runDocker(["cp", localPath, `${containerName}:${remotePath}`]);
+    return remotePath;
+  } finally {
+    rmSync(localPath, { force: true });
+  }
+}
+
 async function assertTargetPostgresImportCompatible(service: Service, dbType: string, sourceInfo: PostgresSourceInfo) {
   const ctx = targetPostgresContext(service, dbType);
   await waitForTargetPostgres(service, ctx.containerName, ctx.user);
@@ -390,6 +409,15 @@ async function assertTargetPostgresImportCompatible(service: Service, dbType: st
   const targetMajor = await readTargetPostgresMajor(service, ctx.envMap, ctx.containerName).catch(() => null);
   if (sourceInfo.major && targetMajor && targetMajor < sourceInfo.major) {
     throw new Error(`Target Postgres ${targetMajor} is older than source Postgres ${sourceInfo.major}. Redeploy this Aeroplane Postgres service with the current image, then run the import again.`);
+  }
+
+  if (Object.keys(sourceInfo.postgis).length) {
+    const names = postgisExtensions.map((name) => `'${name}'`).join(", ");
+    const versions = await readTargetPostgresScalar(service, ctx, `SELECT coalesce(json_object_agg(name, default_version), '{}'::json) FROM pg_available_extensions WHERE name IN (${names});`);
+    assertPostgisImportCompatible(sourceInfo.postgis, JSON.parse(versions));
+    for (const name of postgisExtensions) {
+      if (sourceInfo.postgis[name]) await runTargetPostgresSql(service, ctx, `CREATE EXTENSION IF NOT EXISTS "${name}";`);
+    }
   }
 
   if (dbType === "timescale") {
@@ -403,6 +431,7 @@ async function restorePostgresDump(service: Service, dbType: string, dumpPath: s
   const ctx = targetPostgresContext(service, dbType);
   const remotePath = `/tmp/aeroplane-data-import-${nanoid(10)}-${basename(dumpPath)}`;
   const timescaleTarget = dbType === "timescale";
+  const postgisSource = Object.keys(sourceInfo.postgis).length > 0;
   let remoteListPath: string | null = null;
   let timescaleRestorePrepared = false;
   let restoreError: unknown = null;
@@ -423,7 +452,7 @@ async function restorePostgresDump(service: Service, dbType: string, dumpPath: s
 
   await runDocker(["cp", dumpPath, `${ctx.containerName}:${remotePath}`]);
   try {
-    remoteListPath = timescaleTarget ? await createTimescaleRestoreList(ctx.containerName, remotePath) : null;
+    remoteListPath = timescaleTarget ? await createTimescaleRestoreList(ctx.containerName, remotePath) : postgisSource ? await createPostgisRestoreList(ctx.containerName, remotePath) : null;
     const restoreListArgs = remoteListPath ? [`--use-list=${remoteListPath}`] : [];
     const cleanArgs = timescaleTarget ? [] : ["--clean", "--if-exists"];
     await runDockerExec(

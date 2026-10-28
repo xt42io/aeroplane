@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import { databaseContainerCommandArgs, databaseDataVolumeArg } from "./database-runtime.js";
+import { assertDatabasePlatform, databaseContainerCommandArgs, databaseDataVolumeArg } from "./database-runtime.js";
+import { assertManagedDatabase } from "./database-connections.js";
 import { databaseImageForService } from "./database-source-image.js";
 import { ensureStableDatabaseDataVolume, type BufferedDockerResult } from "./database-volume-adoption.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
@@ -105,6 +106,11 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
   const dbType = databaseTypeForService(service);
   const containerName = containerNameForService(service.id);
   const image = databaseImageForService(service, dbType);
+  if (dbType === "postgis") {
+    const result = await runBufferedDocker(["info", "--format", "{{.Architecture}}"]);
+    if (result.code !== 0) throw new Error("Could not inspect the Docker server architecture.");
+    assertDatabasePlatform(dbType, result.stdout);
+  }
   const bindHost = "0.0.0.0";
   const postgresTlsAssets = isPostgresFamilyDatabase(dbType) ? await ensurePostgresTlsAssets(service) : null;
   const dockerArgs = [
@@ -257,6 +263,7 @@ async function restoreRedis(service: Service, containerName: string, localPath: 
 }
 
 export async function restoreDatabaseDump(dump: MigrationDatabaseDump, localPath: string) {
+  assertManagedDatabase(dump.serviceId);
   const service = getServiceById(dump.serviceId);
   if (!service || !isDatabaseService(service)) {
     throw new Error(`Database service ${dump.serviceId} was not found`);

@@ -435,31 +435,11 @@ export function CreateServiceModal({
     }
   }
 
-  async function handleDatabaseSubmit(payload: {
-    name: string;
-    repoFullName: string;
-    repoUrl: string;
-    branch: string;
-    internalPort: number;
-    databasePublicEnabled: boolean;
-    databasePublicHostname?: string;
-    postgresLogicalReplicationEnabled: boolean;
-    env: Array<{ key: string; value: string }>;
-  }) {
+  async function handleDatabaseSubmit(payload: ServiceFormPayload) {
     setBusy(true);
     setError("");
     try {
-      await onCreate({
-        name: payload.name,
-        repoFullName: payload.repoFullName,
-        repoUrl: payload.repoUrl,
-        branch: payload.branch,
-        internalPort: payload.internalPort,
-        databasePublicEnabled: payload.databasePublicEnabled,
-        databasePublicHostname: payload.databasePublicHostname,
-        postgresLogicalReplicationEnabled: payload.postgresLogicalReplicationEnabled,
-        env: payload.env
-      });
+      await onCreate(payload);
       onClose();
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not create database service");

@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { isMongoDatabase, isPostgresFamilyDatabase, isRelationalDatabase } from "./database-engine.js";
+import { externalDatabaseUrl } from "./database-connections.js";
+import { externalPostgresEnvironment, parseExternalPostgresUrl } from "./external-postgres-url.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { deleteMongoRow, getMongoRows, getMongoTables, insertMongoRow, updateMongoRow } from "./database-mongo-viewer.js";
 import { deleteRedisRow, getRedisRows, getRedisTables, insertRedisRow, updateRedisRow } from "./database-redis-viewer.js";
@@ -173,6 +175,15 @@ function stripTrailingSemicolon(sql: string) {
 }
 
 async function runPostgres(ctx: DatabaseContext, sql: string) {
+  const externalUrl = externalDatabaseUrl(ctx.service.id);
+  if (externalUrl) {
+    if (sql.trimStart().startsWith("\\")) throw new Error("Enter SQL, not psql client commands.");
+    try {
+      return (await runDockerExec(ctx.containerName, ["psql", "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql], externalPostgresEnvironment(parseExternalPostgresUrl(externalUrl)))).stdout.trim();
+    } catch {
+      throw new Error("Could not query the existing database. Check the connection and this database user's permissions.");
+    }
+  }
   const user = ctx.envMap.get("POSTGRES_USER") || "postgres";
   const password = ctx.envMap.get("POSTGRES_PASSWORD") || "";
   const dbName = ctx.envMap.get("POSTGRES_DB") || "aeroplane";
@@ -424,7 +435,7 @@ async function getDatabaseRowsForContext(ctx: DatabaseContext, table: string, li
       FROM (
         SELECT
           c.column_name AS name,
-          c.data_type AS type,
+          CASE WHEN c.data_type = 'USER-DEFINED' AND c.udt_name IN ('geometry', 'geography') THEN c.udt_name ELSE c.data_type END AS type,
           c.is_nullable = 'YES' AS "nullable",
           EXISTS (
             SELECT 1
@@ -445,6 +456,11 @@ async function getDatabaseRowsForContext(ctx: DatabaseContext, table: string, li
     `);
     const activeFilters = activeFiltersForColumns(filters, columns);
     const filterSql = whereClause(activeFilters, postgresFilterSql);
+    // EWKB text preserves dimensions and SRID when a browser edit is submitted.
+    const projection = columns.map((column) => {
+      const identifier = quotePgIdentifier(column.name);
+      return column.type === "geometry" || column.type === "geography" ? `${identifier}::text AS ${identifier}` : identifier;
+    }).join(", ");
     const totalRows = await postgresJson<number>(ctx, `
       SELECT count(*) FROM ${postgresTableSql(table)}
       ${filterSql}
@@ -452,7 +468,7 @@ async function getDatabaseRowsForContext(ctx: DatabaseContext, table: string, li
     const rows = await postgresJson<RowData[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json)
       FROM (
-        SELECT * FROM ${postgresTableSql(table)}
+        SELECT ${projection || "*"} FROM ${postgresTableSql(table)}
         ${filterSql}
         LIMIT ${safeLimit} OFFSET ${safeOffset}
       ) r

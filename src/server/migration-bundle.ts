@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import { config } from "./config.js";
+import { isExternalDatabase } from "./database-connections.js";
 import { createDatabaseBackup } from "./database-backups.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { db, nowIso, sqlite } from "./db.js";
@@ -29,6 +30,7 @@ import { services, users } from "./schema.js";
 const logicalTables = [
   "project_groups",
   "projects",
+  "database_connections",
   "deployments",
   "deployment_logs",
   "env_vars",
@@ -42,6 +44,7 @@ const logicalTables = [
 
 const deleteOrder = [
   "auth_sessions",
+  "database_connections",
   "deployment_logs",
   "database_backups",
   "database_backup_settings",
@@ -179,7 +182,7 @@ function replaceLogicalData(data: LogicalData, sourceDataDir: string, options: {
     for (const table of logicalTables) {
       if (table === "users" && options.includeUsers === false) continue;
       const rows = table === "database_backups" ? remapBackupPaths(data[table], sourceDataDir, targetDataDir) : data[table];
-      insertRows(table, rows);
+      insertRows(table, rows ?? []);
     }
   });
   transaction();
@@ -231,7 +234,7 @@ function copyOptionalFile(source: string, target: string) {
 
 async function createDatabaseDumps(payloadDir: string) {
   const dumpsDir = join(payloadDir, "database-dumps");
-  const databaseServices = db.select().from(services).orderBy(asc(services.name)).all().filter(isDatabaseService);
+  const databaseServices = db.select().from(services).orderBy(asc(services.name)).all().filter((service) => isDatabaseService(service) && !isExternalDatabase(service.id));
   const dumps: MigrationDatabaseDump[] = [];
 
   for (const service of databaseServices) {

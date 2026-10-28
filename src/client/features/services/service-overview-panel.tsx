@@ -18,6 +18,7 @@ import { formatBuildDuration } from "./service-format";
 import type { ServiceTab } from "./service-tabs";
 import { dockerImageForService, isDockerImageService } from "../../../shared/service-source";
 import { functionRuntimeLabels, isFunctionService } from "../../../shared/service-functions";
+import { DatabaseConnectionOverview } from "./database-connection-overview";
 
 type ServiceOverviewPanelProps = {
   service: Service;
@@ -48,6 +49,7 @@ function repoLabel(service: Service, isDatabase: boolean, databaseEngine: string
 
 function serviceLink(service: Service, isDatabase: boolean) {
   if (isDatabase) {
+    if (service.databaseConnection) return { label: `${service.databaseConnection.host}:${service.databaseConnection.port}`, href: "" };
     const publicHost = service.databasePublicEnabled && service.databasePublicHostname
       ? `${service.databasePublicHostname}:${service.hostPort}`
       : "";
@@ -189,6 +191,7 @@ export function ServiceOverviewPanel({
   onDeploy,
   onTabChange
 }: ServiceOverviewPanelProps) {
+  if (service.databaseConnection) return <DatabaseConnectionOverview service={service} busy={busy === "deploy"} onCheck={onDeploy} onTabChange={onTabChange} />;
   const latestDeployment = deployments[0] ?? null;
   const latestStatus = latestDeployment ? displayDeploymentStatus(latestDeployment.status) : "none";
   const latestDuration = latestDeployment
@@ -234,7 +237,7 @@ export function ServiceOverviewPanel({
             disabled={busy === "deploy"}
           >
             <DeployPlaneIcon size={14} />
-            {busy === "deploy" ? "Deploying…" : "Deploy"}
+            {service.databaseConnection ? busy === "deploy" ? "Checking…" : "Check connection" : busy === "deploy" ? "Deploying…" : "Deploy"}
           </button>
         </header>
 

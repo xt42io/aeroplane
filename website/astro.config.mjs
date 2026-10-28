@@ -64,6 +64,7 @@ export default defineConfig({
           label: "Databases",
           items: [
             "docs/databases/overview",
+            "docs/databases/postgis",
             "docs/databases/data-browser",
             "docs/databases/data-imports",
             "docs/databases/public-access-and-tls",

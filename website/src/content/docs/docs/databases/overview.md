@@ -11,12 +11,14 @@ Aeroplane can create:
 
 | Engine | Default port | Notes |
 | --- | ---: | --- |
-| PostgreSQL | `5432` | Supports logical replication and backups. |
+| PostgreSQL | `5432` | Optional PostGIS, logical replication, and backups. |
 | TimescaleDB | `5432` | PostgreSQL-family service with TimescaleDB extension handling. |
 | MySQL | `3306` | Supports browsing, SQL console, row editing, backups, and restore. |
 | Redis | `6379` | Supports key browsing/editing and backups. |
 | MongoDB | `27017` | Supports collection browsing/editing and backups. |
 | ClickHouse | `8123` | Supports browsing and SQL console. Backups are not available yet. |
+
+PostgreSQL setup offers **Include PostGIS** and **Connect an existing database**. See [PostGIS and existing PostgreSQL connections](/docs/databases/postgis/).
 
 ## Created Variables
 

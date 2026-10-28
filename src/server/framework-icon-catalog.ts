@@ -72,6 +72,7 @@ export const FRAMEWORK_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
 ];
 
 export const DATABASE_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
+  { slug: "postgis", name: "PostgreSQL with PostGIS", search: "PostGIS", sourcePath: "postgresql.svg", titleAliases: ["PostGIS"], website: "https://postgis.net/" },
   { slug: "postgres", name: "PostgreSQL", search: "PostgreSQL", sourcePath: "postgresql.svg", titleAliases: ["PostgreSQL"], website: "https://www.postgresql.org/" },
   {
     slug: "timescale",

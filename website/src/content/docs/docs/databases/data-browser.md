@@ -9,14 +9,14 @@ The database data browser gives operational access inside the service page. It i
 
 | Engine | Browse | Edit | SQL console |
 | --- | --- | --- | --- |
-| PostgreSQL | Tables | Yes | Yes |
+| PostgreSQL (including PostGIS) | Tables | Yes | Yes |
 | TimescaleDB | Tables | Yes | Yes |
 | MySQL | Tables | Yes | Yes |
 | Redis | Keys | Yes | No |
 | MongoDB | Collections | Yes | No |
 | ClickHouse | Tables | Read-only | Yes |
 
-Aeroplane hides TimescaleDB internal schemas from table lists.
+Aeroplane hides TimescaleDB internal schemas from table lists. Existing PostgreSQL connections use the same table editor and SQL console; the supplied database user determines which operations are permitted. See [PostGIS and existing connections](/docs/databases/postgis/).
 
 ## Filters and Pagination
 

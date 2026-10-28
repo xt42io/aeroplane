@@ -164,7 +164,8 @@ function databaseTypeFromImage(image: string) {
 
   if (!name) return null;
   if (path.includes("timescale/timescaledb") || name.includes("timescaledb") || name.includes("timescale")) return "timescale";
-  if (path === "postgis/postgis" || name === "postgres" || name.startsWith("postgres-") || name.includes("postgresql")) return "postgres";
+  if (path === "postgis/postgis") return "postgis";
+  if (name === "postgres" || name.startsWith("postgres-") || name.includes("postgresql")) return "postgres";
   if (name === "mysql" || name.startsWith("mysql-") || name === "mariadb" || name.startsWith("mariadb-")) return "mysql";
   if (name === "redis" || name.startsWith("redis-")) return "redis";
   if (name === "mongo" || name === "mongodb" || name.startsWith("mongo-") || name.startsWith("mongodb-")) return "mongodb";
@@ -176,6 +177,7 @@ function databaseTypeFromName(name: string) {
   const lowercaseName = name.toLowerCase();
   if (
     lowercaseName.includes("timescale") ||
+    lowercaseName.includes("postgis") ||
     lowercaseName.includes("postgres") ||
     lowercaseName.includes("mysql") ||
     lowercaseName.includes("redis") ||

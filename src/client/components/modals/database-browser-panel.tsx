@@ -13,7 +13,7 @@ import { DatabaseRuntimeStatePanel } from "./database-runtime-state-panel";
 import { ConfirmationDialog } from "./confirmation-dialog";
 
 function isPostgresFamilyDatabase(engine: string) {
-  return engine === "postgres" || engine === "timescale";
+  return engine === "postgres" || engine === "postgis" || engine === "timescale";
 }
 
 function rowValue(value: unknown) {
@@ -53,7 +53,7 @@ function databaseSchemaNames(schemas: DatabaseSchema[], tables: DatabaseTable[])
   ])).filter(Boolean);
 }
 
-export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
+export function DatabaseBrowserPanel({ serviceId, external = false }: { serviceId: string; external?: boolean }) {
   const [tables, setTables] = useState<DatabaseTable[]>([]);
   const [schemas, setSchemas] = useState<DatabaseSchema[]>([]);
   const [selectedTable, setSelectedTable] = useState("");
@@ -87,7 +87,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const nouns = browserNouns(rowsResult?.engine ?? engine);
   const isRedis = engine === "redis";
   const isMongo = engine === "mongodb" || engine === "mongo";
-  const canImportData = isPostgresFamilyDatabase(engine);
+  const canImportData = isPostgresFamilyDatabase(engine) && !external;
   const canAddDocument = isRedis || isMongo;
   const latestDataImport = dataImports[0] ?? null;
   const activeDataImport = dataImports.find((dataImport) => (

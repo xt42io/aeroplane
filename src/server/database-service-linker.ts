@@ -1,5 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { externalDatabaseUrl, isExternalDatabase } from "./database-connections.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { buildDatabaseConnectionUrl, databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { db, nowIso } from "./db.js";
@@ -100,7 +101,7 @@ function databaseConnectionEnvSuggestionsForProjectServices(projectId: string, e
     suggestions.push({
       key: databaseConnectionSuggestionKey(dbType, connectionUrl.key),
       sourceKey: connectionUrl.key,
-      value: connectionUrl.value,
+      value: externalDatabaseUrl(databaseService.id) ?? connectionUrl.value,
       label: `${databaseService.name} ${dbType} connection`,
       serviceId: databaseService.id,
       serviceName: databaseService.name,
@@ -144,6 +145,7 @@ export function syncProjectDatabaseConnectionEnv(projectId: string) {
       port: databaseService.internalPort
     });
 
+    if (isExternalDatabase(databaseService.id)) continue;
     if (envMap.get(connectionUrl.key) !== connectionUrl.value) {
       upsertEnvVar(databaseService.id, connectionUrl.key, connectionUrl.value, timestamp);
       envMap.set(connectionUrl.key, connectionUrl.value);
@@ -178,7 +180,7 @@ export function linkProjectAppDatabaseConnectionEnv(projectId: string) {
       service: databaseService,
       dbType,
       key: databaseConnectionSuggestionKey(dbType, connectionUrl.key),
-      value: connectionUrl.value
+      value: externalDatabaseUrl(databaseService.id) ?? connectionUrl.value
     };
   });
 

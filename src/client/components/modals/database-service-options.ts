@@ -1,4 +1,4 @@
-export type DatabaseType = "postgres" | "timescale" | "mysql" | "redis" | "mongodb" | "clickhouse";
+export type DatabaseType = "postgres" | "postgis" | "timescale" | "mysql" | "redis" | "mongodb" | "clickhouse";
 
 export type DatabaseOption = {
   key: DatabaseType;
@@ -24,7 +24,7 @@ function databaseIconUrl(slug: string) {
 }
 
 export function isPostgresFamilyDatabase(dbType: string) {
-  return dbType === "postgres" || dbType === "timescale";
+  return dbType === "postgres" || dbType === "postgis" || dbType === "timescale";
 }
 
 export const DATABASE_OPTIONS: DatabaseOption[] = [
@@ -68,6 +68,7 @@ export const DATABASE_OPTIONS: DatabaseOption[] = [
 ];
 
 export function getDatabaseOption(dbType: DatabaseType) {
+  if (dbType === "postgis") return { ...DATABASE_OPTIONS[0], key: dbType, name: "PostgreSQL with PostGIS" };
   return DATABASE_OPTIONS.find((option) => option.key === dbType) ?? DATABASE_OPTIONS[0];
 }
 

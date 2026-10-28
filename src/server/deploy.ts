@@ -14,7 +14,8 @@ import { getCloneTokenForRepo } from "./github-connect.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
-import { databaseContainerCommandArgs, databaseDataVolumeArg } from "./database-runtime.js";
+import { assertDatabasePlatform, databaseContainerCommandArgs, databaseDataVolumeArg } from "./database-runtime.js";
+import { assertManagedDatabase } from "./database-connections.js";
 import { databaseImageForService } from "./database-source-image.js";
 import { ensureStableDatabaseDataVolume } from "./database-volume-adoption.js";
 import { ensureDefaultDomainForService } from "./service-domains.js";
@@ -41,6 +42,8 @@ import { isFunctionService } from "../shared/service-functions.js";
 import { functionRuntimeLabel, writeFunctionDeploymentProject } from "./service-functions.js";
 import { prepareTanStackStartRuntime } from "./tanstack-start-runtime.js";
 import { applicationDataVolumeDockerArgs } from "./application-volume.js";
+import { containerNameForService, safeDockerIdentifier, safeSlug } from "./docker-identifiers.js";
+export { containerNameForService } from "./docker-identifiers.js";
 
 type RunOptions = {
   cwd?: string;
@@ -73,28 +76,6 @@ class DeploymentAbortedError extends Error {
 
 function now() {
   return nowIso();
-}
-
-// Docker reference components only allow `.`, `_`, `__`, or runs of `-` between
-// alphanumerics. Collapse any other separator run (e.g. `_-` from a nanoid id,
-// `___`, `..`) to a single `-`, leaving already-valid separators untouched.
-function normalizeDockerSeparators(value: string) {
-  return value.replace(/[._-]+/g, (sep) => {
-    if (/^-+$/.test(sep) || sep === "_" || sep === "__" || sep === ".") return sep;
-    return "-";
-  });
-}
-
-function safeSlug(value: string) {
-  return normalizeDockerSeparators(value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")).replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "").slice(0, 48) || "app";
-}
-
-function safeDockerIdentifier(value: string, fallback: string) {
-  return normalizeDockerSeparators(value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")).replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "") || fallback;
-}
-
-export function containerNameForService(serviceId: string) {
-  return `deploy-${safeDockerIdentifier(serviceId, "service")}`;
 }
 
 export function staticSiteDirForService(serviceId: string) {
@@ -817,6 +798,7 @@ async function exportStaticSiteFromImage(deployment: Deployment, service: Servic
 }
 
 export function enqueueDeployment(serviceId: string, options: EnqueueOptions) {
+  assertManagedDatabase(serviceId);
   const service = getServiceById(serviceId);
   if (!service) {
     throw new Error("Service not found");
@@ -867,6 +849,11 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
     try {
       await ensureDockerAvailable(deployment.id);
+
+      if (dbType === "postgis") {
+        const architecture = await runBufferedCommand("docker", ["info", "--format", "{{.Architecture}}"]);
+        assertDatabasePlatform(dbType, architecture.stdout);
+      }
 
       const redisPersistence = {
         containerName,

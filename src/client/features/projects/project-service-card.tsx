@@ -127,7 +127,7 @@ export function ProjectServiceCard({
 
           {isDatabase ? (
             <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">
-              {window.location.hostname}:{service.hostPort}
+              {service.databaseConnection ? `${service.databaseConnection.host}:${service.databaseConnection.port}` : `${window.location.hostname}:${service.hostPort}`}
             </p>
           ) : visibleUrl ? (
             <a

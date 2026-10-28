@@ -18,6 +18,9 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { isValidApplicationVolumePath } from "./application-volume.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
+import { ensureExternalDatabaseClient, externalDatabaseSummary, isExternalDatabase, saveExternalDatabaseConnection, testExternalDatabaseUrl } from "./database-connections.js";
+import { parseExternalPostgresUrl } from "./external-postgres-url.js";
+import { registerDatabaseConnectionRoutes } from "./database-connection-routes.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, staticSiteDirForService } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { normalizeServiceBuildMethod, serviceBuildMethods } from "./dockerfile-build.js";
@@ -286,6 +289,7 @@ const serviceSettingsSchema = z.object({
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
   databasePublicEnabled: z.boolean().optional().default(true),
   databasePublicHostname: publicHostnameSchema,
+  databaseConnectionUrl: z.string().trim().min(1).max(4096).optional(),
   postgresLogicalReplicationEnabled: z.boolean().optional().default(true),
   functionRuntime: z.enum(functionRuntimes).optional(),
   sourceCode: z.string().optional()
@@ -786,6 +790,7 @@ async function publicService(service: Service, options: PublicServiceOptions = {
   const includeDomains = options.includeDomains ?? true;
   const normalizedService = ensureDatabasePublicDefaults(service) ?? service;
   const isDatabase = isDatabaseService(normalizedService);
+  const databaseConnection = isDatabase ? externalDatabaseSummary(service.id) : null;
   const isDockerImage = isDockerImageService(normalizedService);
   const isFunction = isFunctionService(normalizedService);
   const isWorker = isWorkerService(normalizedService);
@@ -804,7 +809,9 @@ async function publicService(service: Service, options: PublicServiceOptions = {
     : null;
   const shouldProbe = liveChecks && service.status === "active";
   const reachable = shouldProbe
-    ? isWorker
+    ? databaseConnection
+      ? await checkPortReachable(databaseConnection.port, databaseConnection.host)
+      : isWorker
       ? await checkContainerRunning(containerNameForService(service.id))
       : isStaticSite
         ? checkStaticSiteReady(service.id)
@@ -874,6 +881,7 @@ async function publicService(service: Service, options: PublicServiceOptions = {
     hostPort: service.hostPort,
     databasePublicEnabled: Boolean(service.databasePublicEnabled),
     databasePublicHostname: service.databasePublicHostname,
+    databaseConnection,
     postgresLogicalReplicationEnabled: Boolean(service.postgresLogicalReplicationEnabled),
     status: liveStatus,
     reachable,
@@ -913,7 +921,7 @@ async function summarizeProject(project: ProjectGroup, projectServices: Service[
   };
 }
 
-function createServiceRecord(projectId: string, environmentId: string, input: z.infer<typeof createServiceSchema>) {
+async function createServiceRecord(projectId: string, environmentId: string, input: z.infer<typeof createServiceSchema>) {
   const timestamp = nowIso();
   const serviceSlug = createUniqueSlug(input.name, getServiceSlugSet(projectId));
   const inputFunctionRuntime = input.functionRuntime ?? functionRuntimeForService({ repoFullName: input.repoFullName ?? null, repoUrl: input.repoUrl ?? "" });
@@ -931,7 +939,17 @@ function createServiceRecord(projectId: string, environmentId: string, input: z.
   const isDatabase = repoUrl === "database" || (repoFullName?.startsWith("database:") ?? false);
   const isFunction = isFunctionService({ repoFullName, repoUrl });
   const dbType = isDatabase ? databaseTypeForService({ repoFullName, repoUrl }) : "";
-  const databasePublicHostname = isDatabase
+  const externalUrl = input.databaseConnectionUrl;
+  if (isDatabase && isPostgresFamilyDatabase(dbType) && !externalUrl && !input.env.some((entry) => entry.key === "POSTGRES_PASSWORD" && entry.value.trim())) {
+    throw new Error("Set POSTGRES_PASSWORD to create a new PostgreSQL database. To connect an existing database, choose Connect an existing database and enter its connection URL.");
+  }
+  if (externalUrl) {
+    if (!isDatabase || !["postgres", "postgis"].includes(dbType)) throw new Error("Existing connections are supported for PostgreSQL services only.");
+    parseExternalPostgresUrl(externalUrl);
+    if (!hasSecretKey()) throw new Error("Complete Aeroplane setup before saving an encrypted database connection.");
+    await testExternalDatabaseUrl(externalUrl, dbType === "postgis");
+  }
+  const databasePublicHostname = isDatabase && !externalUrl
     ? input.databasePublicHostname ?? defaultDatabasePublicHostname(serviceSlug)
     : null;
 
@@ -960,16 +978,27 @@ function createServiceRecord(projectId: string, environmentId: string, input: z.
     internalPort: input.internalPort,
     hostPort: allocateHostPort(),
     activePort: null,
-    databasePublicEnabled: isDatabase,
+    databasePublicEnabled: isDatabase && !externalUrl,
     databasePublicHostname,
-    postgresLogicalReplicationEnabled: isDatabase && isPostgresFamilyDatabase(dbType) && input.postgresLogicalReplicationEnabled,
-    status: "idle",
+    postgresLogicalReplicationEnabled: isDatabase && !externalUrl && isPostgresFamilyDatabase(dbType) && input.postgresLogicalReplicationEnabled,
+    status: externalUrl ? "active" : "idle",
     lastDeployedAt: null,
     createdAt: timestamp,
     updatedAt: timestamp
   };
 
   db.insert(services).values(service).run();
+
+  if (externalUrl) {
+    saveExternalDatabaseConnection(service.id, externalUrl);
+    try {
+      await ensureExternalDatabaseClient(service.id);
+    } catch (error) {
+      db.delete(services).where(eq(services.id, service.id)).run();
+      throw error;
+    }
+    return service;
+  }
 
   if (isFunction) {
     createServiceFunction(service.id, inputFunctionRuntime, input.sourceCode);
@@ -1006,6 +1035,7 @@ function createServiceRecord(projectId: string, environmentId: string, input: z.
 }
 
 function syncDatabaseUrlEnvVar(serviceId: string) {
+  if (isExternalDatabase(serviceId)) return;
   const service = ensureDatabasePublicDefaults(getServiceById(serviceId));
   if (!service) return;
   if (!isDatabaseService(service)) return;
@@ -1085,6 +1115,7 @@ function defaultDatabasePublicHostname(serviceSlug: string) {
 
 function ensureDatabasePublicDefaults(service: Service | undefined) {
   if (!service || !isDatabaseService(service)) return service ?? null;
+  if (isExternalDatabase(service.id)) return service;
 
   const nextHostname = service.databasePublicHostname ?? defaultDatabasePublicHostname(service.slug);
   if (service.databasePublicEnabled && service.databasePublicHostname === nextHostname) return service;
@@ -1772,6 +1803,7 @@ app.post("/api/system/settings", async (c) => {
 registerApiKeyRoutes(app);
 registerBackupStorageRoutes(app);
 registerSystemUserRoutes(app);
+registerDatabaseConnectionRoutes(app);
 
 app.get("/api/system/r2", (c) => c.json({ r2: publicR2Settings() }));
 
@@ -2338,7 +2370,12 @@ app.post("/api/projects/:projectId/services", async (c) => {
     return jsonError(body.data.environmentId ? "Environment not found" : "Project has no default environment", 404);
   }
 
-  const service = createServiceRecord(project.id, environment.id, body.data);
+  let service: Service;
+  try {
+    service = await createServiceRecord(project.id, environment.id, body.data);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not create service", 400);
+  }
   db.update(projectGroups).set({ updatedAt: nowIso() }).where(eq(projectGroups.id, project.id)).run();
   await writeAndReloadCaddy();
   return c.json({ service: await publicService(service) }, 201);
@@ -2774,7 +2811,7 @@ app.get("/api/services/:serviceId/database/tls", async (c) => {
   if (!isDatabaseService(service)) {
     return jsonError("Database service not found", 404);
   }
-  if (!isPostgresFamilyDatabase(databaseTypeForService(service))) {
+  if (isExternalDatabase(service.id) || !isPostgresFamilyDatabase(databaseTypeForService(service))) {
     return jsonError("Postgres TLS setup is only available for Postgres-compatible services.", 400);
   }
 
@@ -2795,7 +2832,7 @@ app.get("/api/services/:serviceId/database/tls/ca", async (c) => {
   if (!isDatabaseService(service)) {
     return jsonError("Database service not found", 404);
   }
-  if (!isPostgresFamilyDatabase(databaseTypeForService(service))) {
+  if (isExternalDatabase(service.id) || !isPostgresFamilyDatabase(databaseTypeForService(service))) {
     return jsonError("Postgres TLS setup is only available for Postgres-compatible services.", 400);
   }
 
@@ -2913,6 +2950,12 @@ app.patch("/api/services/:serviceId", async (c) => {
   const body = updateServiceSchema.safeParse(await c.req.json());
   if (!body.success) {
     return jsonError(body.error.issues[0]?.message ?? "Invalid update");
+  }
+
+  if (isExternalDatabase(service.id)) {
+    if (Object.keys(body.data).some((key) => key !== "name")) return jsonError("Only the connection name can be changed here. Use the database connection settings to update its URL.", 400);
+    db.update(services).set({ name: body.data.name ?? service.name, updatedAt: nowIso() }).where(eq(services.id, service.id)).run();
+    return c.json({ service: await publicService(getServiceById(service.id)!) });
   }
 
   const { dockerImage, ...updateData } = body.data;

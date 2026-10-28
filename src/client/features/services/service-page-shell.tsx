@@ -30,6 +30,7 @@ import { DirectoryPickerModal } from "../../components/modals/directory-picker";
 import { SourcePickerModal } from "../../components/modals/source-picker";
 import { TransferServiceModal } from "../../components/modals/transfer-service-modal";
 import { ConfirmationDialog } from "../../components/modals/confirmation-dialog";
+import { DatabaseConnectionSettings } from "../../components/modals/database-connection-settings";
 import { DatabaseServiceSettingsPanel } from "../../components/modals/database-service-settings-panel";
 import { DockerImageServiceSettingsPanel } from "../../components/modals/docker-image-service-settings-panel";
 import { FunctionServiceSettingsPanel } from "../../components/modals/function-service-settings-panel";
@@ -523,6 +524,11 @@ export function ServicePageShell({
     setBusy("deploy");
     setError("");
     try {
+      if (overview?.service.databaseConnection) {
+        await api.checkDatabaseConnection(serviceId);
+        await loadOverview();
+        return;
+      }
       const result = await api.createDeployment(serviceId);
       startTransition(() => {
         setActiveDeploymentId(result.deployment.id);
@@ -589,6 +595,7 @@ export function ServicePageShell({
 
   const service = overview?.service;
   const isDatabase = service ? isDatabaseService(service) : false;
+  const isExternalDatabase = Boolean(service?.databaseConnection);
   const isDockerImage = service ? isDockerImageService(service) : false;
   const isFunction = service ? isFunctionService(service) : false;
   const isWorker = service?.runtimeMode === "worker";
@@ -596,7 +603,7 @@ export function ServicePageShell({
   const databaseEngine = service?.repoFullName?.startsWith("database:")
     ? service.repoFullName.slice("database:".length).toLowerCase()
     : "";
-  const supportsPostgresLogicalReplication = databaseEngine === "postgres" || databaseEngine === "timescale";
+  const supportsPostgresLogicalReplication = databaseEngine === "postgres" || databaseEngine === "postgis" || databaseEngine === "timescale";
   const hasSqlConsole = isDatabase && databaseEngine !== "redis" && databaseEngine !== "mongodb" && databaseEngine !== "mongo";
   const appTabs: Array<[ServiceTab, unknown]> = [
     ["overview", DashboardSquare02Icon],
@@ -607,7 +614,9 @@ export function ServicePageShell({
     ...(!isWorker ? [["domains", Globe02Icon] as [ServiceTab, unknown]] : []),
     ["settings", GithubIcon]
   ];
-  const databaseTabs: Array<[ServiceTab, unknown]> = [
+  const databaseTabs: Array<[ServiceTab, unknown]> = isExternalDatabase ? [
+    ["overview", DashboardSquare02Icon], ["data", DatabaseIcon], ["sql", VideoConsoleIcon], ["settings", GithubIcon]
+  ] : [
     ["overview", DashboardSquare02Icon],
     ["data", DatabaseIcon],
     ["backups", DatabaseExportIcon],
@@ -744,7 +753,7 @@ export function ServicePageShell({
               ) : null}
 
               {selectedTab === "data" && isDatabase ? (
-                databaseEngine === "redis" ? <RedisBrowserPanel serviceId={serviceId} /> : <DatabaseBrowserPanel serviceId={serviceId} />
+                databaseEngine === "redis" ? <RedisBrowserPanel serviceId={serviceId} /> : <DatabaseBrowserPanel serviceId={serviceId} external={isExternalDatabase} />
               ) : null}
 
               {selectedTab === "sql" && hasSqlConsole ? <DatabaseSqlConsolePanel serviceId={serviceId} /> : null}
@@ -773,7 +782,7 @@ export function ServicePageShell({
               ) : null}
 
               {selectedTab === "settings" ? (
-                <form onSubmit={saveSettings} className="mx-auto w-full max-w-[1100px] overflow-visible border border-white/10 bg-black">
+                isExternalDatabase && service ? <DatabaseConnectionSettings key={service.id} service={service} onUpdated={loadOverview} onRemove={() => setDeleteDialogOpen(true)} /> : <form onSubmit={saveSettings} className="mx-auto w-full max-w-[1100px] overflow-visible border border-white/10 bg-black">
                   <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-5">
                     <div>
                       <h2 className="text-lg tracking-[-0.03em] text-white">Settings</h2>
@@ -951,10 +960,10 @@ export function ServicePageShell({
       />
       <ConfirmationDialog
         open={deleteDialogOpen && Boolean(service)}
-        title="Delete service?"
+        title={isExternalDatabase ? "Remove database connection?" : "Delete service?"}
         subject={service?.name}
-        description="This will permanently remove the service, its deployments, variables, domains, and related runtime resources."
-        confirmLabel="Delete service"
+        description={isExternalDatabase ? "This removes the Aeroplane connection and its client. The existing database and its data remain intact." : "This will permanently remove the service, its deployments, variables, domains, and related runtime resources."}
+        confirmLabel={isExternalDatabase ? "Remove connection" : "Delete service"}
         busy={busy === "delete"}
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={deleteService}

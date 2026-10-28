@@ -138,7 +138,7 @@ ${caddyTlsConfig(row.hostname)}  encode zstd gzip
     if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
 
     addHostnameBlock(row.hostname, `${row.hostname} {
-${caddyTlsConfig(row.hostname)}  respond "Aeroplane ${dbType === "timescale" ? "TimescaleDB" : "Postgres"} is available on TCP ${row.hostPort}." 200
+${caddyTlsConfig(row.hostname)}  respond "Aeroplane ${dbType === "timescale" ? "TimescaleDB" : dbType === "postgis" ? "PostgreSQL with PostGIS" : "Postgres"} is available on TCP ${row.hostPort}." 200
 }`);
   }
 

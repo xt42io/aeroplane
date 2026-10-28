@@ -67,6 +67,13 @@ export const deployments = sqliteTable("deployments", {
   createdAt: text("created_at").notNull()
 });
 
+export const databaseConnections = sqliteTable("database_connections", {
+  serviceId: text("service_id").primaryKey().references(() => services.id, { onDelete: "cascade" }),
+  connectionUrl: text("connection_url").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
 export const deploymentLogs = sqliteTable("deployment_logs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   deploymentId: text("deployment_id").notNull(),

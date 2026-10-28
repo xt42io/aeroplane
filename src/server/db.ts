@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS database_connections (
+  service_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  connection_url TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS deployments (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

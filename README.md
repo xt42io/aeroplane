@@ -15,7 +15,8 @@ It currently supports:
 - Generated service domains from a wildcard root domain.
 - Custom domains through Caddy.
 - Environment variable management.
-- PostgreSQL, Redis, and MongoDB services.
+- PostgreSQL with optional PostGIS, Redis, and MongoDB services.
+- Existing PostgreSQL/PostGIS connections with table editing and SQL access.
 - Database browsing, editing, SQL console support where applicable, and backups.
 - Scoped API keys for programmatic access to project and service endpoints.
 

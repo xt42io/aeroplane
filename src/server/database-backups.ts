@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { nanoid } from "nanoid";
 import { config } from "./config.js";
 import { isMongoDatabase, isPostgresFamilyDatabase } from "./database-engine.js";
+import { assertManagedDatabase, isExternalDatabase } from "./database-connections.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { runDockerExec, type DatabaseContext } from "./database-viewer-shared.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
@@ -51,6 +52,7 @@ function envMapForService(serviceId: string) {
 }
 
 function databaseContext(serviceId: string): DatabaseContext {
+  assertManagedDatabase(serviceId);
   const service = getServiceById(serviceId);
   if (!service || !isDatabaseService(service)) {
     throw new Error("Database service not found");
@@ -617,7 +619,7 @@ function latestScheduledBackupAt(serviceId: string, trigger: Exclude<BackupTrigg
 }
 
 async function runAutomaticBackupsOnce() {
-  const databaseServices = db.select().from(services).all().filter(isDatabaseService);
+  const databaseServices = db.select().from(services).all().filter((service) => isDatabaseService(service) && !isExternalDatabase(service.id));
 
   for (const service of databaseServices) {
     const settings = getDatabaseBackupSettings(service.id);

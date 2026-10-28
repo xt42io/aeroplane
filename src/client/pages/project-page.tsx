@@ -177,14 +177,14 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
       ...payload,
       environmentId: selectedEnvironment.id
     });
-    await api.createDeployment(result.service.id);
+    if (!result.service.databaseConnection) await api.createDeployment(result.service.id);
     await loadProject();
     void navigate({
       to: "/$projectSlug/$serviceSlug/$serviceTab",
       params: {
         projectSlug,
         serviceSlug: result.service.slug,
-        serviceTab: "deployments",
+        serviceTab: result.service.databaseConnection ? "data" : "deployments",
       },
     });
   }

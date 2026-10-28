@@ -17,6 +17,7 @@ export AEROPLANE_API_KEY="ap_..."
 Use these engine IDs in `repoFullName`:
 
 - `database:postgres`
+- `database:postgis` (PostgreSQL with PostGIS)
 - `database:timescale`
 - `database:mysql`
 - `database:redis`

@@ -44,6 +44,7 @@ export type Service = {
   hostPort: number;
   databasePublicEnabled: boolean;
   databasePublicHostname: null | string;
+  databaseConnection: null | { host: string; port: number; database: string; user: string; sslMode: string };
   postgresLogicalReplicationEnabled: boolean;
   status: string;
   reachable: boolean;
@@ -820,6 +821,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sql })
     }),
+  checkDatabaseConnection: (serviceId: string) => request<{ ok: boolean }>(`/api/services/${serviceId}/database/connection/check`, { method: "POST" }),
+  updateDatabaseConnection: (serviceId: string, url: string) => request<{ ok: boolean }>(`/api/services/${serviceId}/database/connection`, { method: "PATCH", body: JSON.stringify({ url }) }),
   insertDatabaseRow: (serviceId: string, body: { table: string; values: DatabaseRow }) =>
     request<{ ok: boolean; table?: string; id?: string }>(`/api/services/${serviceId}/database/rows`, { method: "POST", body: JSON.stringify(body) }),
   updateDatabaseRow: (serviceId: string, body: { table: string; primaryKey: DatabaseRow; values: DatabaseRow }) =>

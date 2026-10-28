@@ -7,6 +7,7 @@ function safeDockerIdentifier(value: string, fallback: string) {
 }
 
 export function databaseImage(dbType: string) {
+  if (dbType === "postgis") return "postgis/postgis:18-3.6";
   if (dbType === "timescale") return "timescale/timescaledb:latest-pg18";
   if (isPostgresFamilyDatabase(dbType)) return "postgres:18-alpine";
   if (dbType === "mysql") return "mysql:8";
@@ -14,6 +15,12 @@ export function databaseImage(dbType: string) {
   if (dbType === "mongodb" || dbType === "mongo") return "mongo:6";
   if (dbType === "clickhouse") return "clickhouse/clickhouse-server:latest";
   return "postgres:18-alpine";
+}
+
+export function assertDatabasePlatform(dbType: string, architecture: string) {
+  if (dbType === "postgis" && !["amd64", "x86_64"].includes(architecture.trim())) {
+    throw new Error("The PostGIS image currently supports x86-64 servers only. No database containers or volumes were changed.");
+  }
 }
 
 export function databaseDataVolumeName(serviceId: string) {

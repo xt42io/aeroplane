@@ -1,4 +1,4 @@
-export const postgresFamilyDatabaseTypes = new Set(["postgres", "timescale"]);
+export const postgresFamilyDatabaseTypes = new Set(["postgres", "postgis", "timescale"]);
 
 export function isPostgresFamilyDatabase(dbType: string) {
   return postgresFamilyDatabaseTypes.has(dbType);

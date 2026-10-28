@@ -21,6 +21,7 @@ export type ServiceFormPayload = {
   databasePublicEnabled?: boolean;
   databasePublicHostname?: string;
   postgresLogicalReplicationEnabled?: boolean;
+  databaseConnectionUrl?: string;
   env?: Array<{
     key: string;
     value: string;

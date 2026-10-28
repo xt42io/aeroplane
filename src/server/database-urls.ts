@@ -23,6 +23,7 @@ export function databaseTypeForService(service: DatabaseServiceShape) {
 
 export function normalizeDatabaseType(value: string) {
   const lower = value.toLowerCase();
+  if (lower.includes("postgis")) return "postgis";
   if (lower.includes("timescale")) return "timescale";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
   if (lower.includes("redis")) return "redis";
